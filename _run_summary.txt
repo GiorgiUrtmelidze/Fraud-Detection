@@ -1,0 +1,4 @@
+winner: LightGBM
+LogisticRegression CV AUC: 0.82185
+LightGBM CV AUC: 0.96621
+submission rows: 506691
