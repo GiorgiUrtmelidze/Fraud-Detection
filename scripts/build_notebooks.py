@@ -47,36 +47,46 @@ def write(path, cells):
 # shared snippets used by every model notebook
 # ---------------------------------------------------------------------------
 
-HEADER_IMPORTS = """\
-import os
-import sys
-import gc
-import warnings
+PREPROC_PATH = Path(__file__).parent.parent / "src" / "preprocessing.py"
+PREPROCESSING_INLINE = PREPROC_PATH.read_text()
+
+
+KAGGLE_BOOTSTRAP = """\
+# --- Kaggle / local bootstrap ---------------------------------------------
+# pulls MLflow creds from Kaggle Secrets when running on Kaggle, else falls
+# back to env vars. data path auto-detects /kaggle/input/ieee-fraud-detection.
+import os, sys, gc, warnings
 warnings.filterwarnings("ignore")
 
+ON_KAGGLE = os.path.exists("/kaggle/input")
+
+if ON_KAGGLE:
+    try:
+        from kaggle_secrets import UserSecretsClient
+        sec = UserSecretsClient()
+        os.environ["MLFLOW_TRACKING_USERNAME"] = sec.get_secret("MLFLOW_TRACKING_USERNAME")
+        os.environ["MLFLOW_TRACKING_PASSWORD"] = sec.get_secret("MLFLOW_TRACKING_PASSWORD")
+    except Exception as e:
+        print("kaggle secrets unavailable:", e)
+    DATA_PATH = "/kaggle/input/ieee-fraud-detection"
+    # mlflow / dagshub not pre-installed on kaggle
+    os.system("pip -q install mlflow dagshub")
+else:
+    DATA_PATH = os.environ.get("IEEE_DATA", "../data")
+"""
+
+
+HEADER_IMPORTS = """\
 import numpy as np
 import pandas as pd
+from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.model_selection import StratifiedKFold, train_test_split
 from sklearn.metrics import roc_auc_score
 from sklearn.pipeline import Pipeline
 
-# repo helpers
-sys.path.append("..")
-from src.preprocessing import (
-    load_raw,
-    EmailDomainCleaner,
-    TransactionAmtFeats,
-    CategoricalEncoder,
-    NaNFiller,
-    HighNullDropper,
-    CorrelatedDropper,
-)
-
 import mlflow
 from mlflow.models.signature import infer_signature
 
-# point this at your DagsHub repo. on kaggle I just set the env vars in
-# the notebook UI and skip the dagshub.init() call.
 try:
     import dagshub
     dagshub.init(
@@ -93,8 +103,6 @@ np.random.seed(SEED)
 """
 
 DATA_LOAD = """\
-# on kaggle:  train, test = load_raw('/kaggle/input/ieee-fraud-detection')
-DATA_PATH = os.environ.get("IEEE_DATA", "../data")
 train, test = load_raw(DATA_PATH)
 print("train:", train.shape, "  test:", test.shape)
 print("fraud rate:", train["isFraud"].mean().round(4))
@@ -118,7 +126,11 @@ def build_model_notebook(name, model_block, model_imports, hp_block, notes_block
            "Each section is logged as a separate MLflow run inside the\n"
            f"`{name}_Training` experiment.\n".replace("{name}", name)),
 
-        md("## 0. Setup"),
+        md("## 0. Setup\n\nFirst cell: bootstraps Kaggle secrets / data paths.\n"
+           "Second cell: inlined `preprocessing.py` (so this notebook is self-contained on Kaggle).\n"
+           "Third cell: imports + DagsHub MLflow init."),
+        code(KAGGLE_BOOTSTRAP),
+        code(PREPROCESSING_INLINE),
         code(HEADER_IMPORTS + "\n" + model_imports),
         code(f'EXPERIMENT = "{name}_Training"\nmlflow.set_experiment(EXPERIMENT)'),
 
@@ -380,15 +392,12 @@ inference_cells = [
        "MLflow Model Registry and runs `predict_proba` on the **raw** test set.\n"
        "No manual preprocessing — the saved sklearn `Pipeline` does it all."),
 
-    md("## 0. Setup"),
+    md("## 0. Setup\n\nKaggle / local bootstrap → inlined preprocessing → MLflow init."),
+    code(KAGGLE_BOOTSTRAP),
+    code(PREPROCESSING_INLINE),
     code("""\
-import os
-import sys
 import pandas as pd
 import numpy as np
-
-sys.path.append("..")
-from src.preprocessing import load_raw
 
 import mlflow
 import mlflow.sklearn
@@ -409,7 +418,6 @@ except Exception as e:
        "Notice we do NOT preprocess anything here — the pipeline pulled from the\n"
        "registry already contains the cleaning + FE + FS steps."),
     code("""\
-DATA_PATH = os.environ.get("IEEE_DATA", "../data")
 _, test = load_raw(DATA_PATH)
 print("test:", test.shape)
 
