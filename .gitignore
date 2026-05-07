@@ -1,0 +1,35 @@
+# data
+data/
+*.csv
+*.parquet
+*.zip
+
+# checkpoints / artifacts
+artifacts/
+mlruns/
+mlartifacts/
+*.pkl
+*.joblib
+*.bin
+submission*.csv
+
+# notebook junk
+.ipynb_checkpoints/
+**/.ipynb_checkpoints/
+
+# python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+.python-version
+
+# editors
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# kaggle
+kaggle.json

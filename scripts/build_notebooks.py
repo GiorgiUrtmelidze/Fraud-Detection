@@ -80,8 +80,8 @@ from mlflow.models.signature import infer_signature
 try:
     import dagshub
     dagshub.init(
-        repo_owner=os.environ.get("DAGSHUB_USER", "your-username"),
-        repo_name=os.environ.get("DAGSHUB_REPO", "ieee-fraud-detection"),
+        repo_owner=os.environ.get("DAGSHUB_USER", "gurtm23"),
+        repo_name=os.environ.get("DAGSHUB_REPO", "Fraud-Detection"),
         mlflow=True,
     )
 except Exception as e:
@@ -248,13 +248,9 @@ with mlflow.start_run(run_name="{name}_FinalFit") as run:
     pipe.fit(X_full, y_full)
 
     sig = infer_signature(X_full.head(5), pipe.predict_proba(X_full.head(5)))
-    mlflow.sklearn.log_model(
-        pipe,
-        artifact_path="pipeline",
-        signature=sig,
-        registered_model_name=None,    # registration is done from inference NB
-    )
+    info = mlflow.sklearn.log_model(pipe, name="pipeline", signature=sig)
     print("logged run:", run.info.run_id)
+    print("model_uri:", info.model_uri)    # save this for registration
 """),
         md("## 5. Notes\n\n"
            "- Anything above ~0.94 CV AUC tends to **overfit** on this dataset (public LB drops a lot).\n"
@@ -400,8 +396,8 @@ import mlflow.sklearn
 try:
     import dagshub
     dagshub.init(
-        repo_owner=os.environ.get("DAGSHUB_USER", "your-username"),
-        repo_name=os.environ.get("DAGSHUB_REPO", "ieee-fraud-detection"),
+        repo_owner=os.environ.get("DAGSHUB_USER", "gurtm23"),
+        repo_name=os.environ.get("DAGSHUB_REPO", "Fraud-Detection"),
         mlflow=True,
     )
 except Exception as e:
@@ -421,15 +417,19 @@ X_test = test.drop(columns=["TransactionID"])
 """),
 
     md("## 2. Pull best model from the Registry\n\n"
-       "I registered the XGBoost pipeline as `ieee_fraud_best` after comparing CV scores.\n"
-       "We use the `Production` stage so the inference notebook always uses the latest promoted model."),
+       "I registered the XGBoost pipeline as `ieee_fraud_best`. DagsHub's MLflow doesn't\n"
+       "support stage transitions, so we use the **alias** mechanism (`production`) instead."),
     code("""\
 MODEL_NAME = os.environ.get("MODEL_NAME", "ieee_fraud_best")
-STAGE = os.environ.get("MODEL_STAGE", "Production")
+ALIAS = os.environ.get("MODEL_ALIAS", "production")
 
-model_uri = f"models:/{MODEL_NAME}/{STAGE}"
-print("loading", model_uri)
-pipe = mlflow.sklearn.load_model(model_uri)
+# alias-based URI (mlflow >= 2.6). fallback to /Production stage for older servers.
+try:
+    pipe = mlflow.sklearn.load_model(f"models:/{MODEL_NAME}@{ALIAS}")
+    print("loaded via alias:", ALIAS)
+except Exception:
+    pipe = mlflow.sklearn.load_model(f"models:/{MODEL_NAME}/Production")
+    print("loaded via stage Production")
 print(pipe)
 """),
 
@@ -454,22 +454,21 @@ sub.head()
 """),
 
     md("## 5. (Optional) — register a new model from a run\n\n"
-       "Useful when comparing models. After the experiment notebooks finish, find the\n"
-       "best run by CV AUC and register its pipeline."),
+       "After all 5 model notebooks finish, find the best `*_FinalFit` run by `cv_mean_auc`\n"
+       "in the MLflow UI, copy its **model_uri** (printed in the notebook output —\n"
+       "looks like `models:/m-xxxxxx`) and run this cell to register & promote."),
     code("""\
-# example — only run if you want to register a fresh model
 # from mlflow.tracking import MlflowClient
 #
 # client = MlflowClient()
-# best_run_id = "PASTE_RUN_ID_FROM_BEST_FINALFIT"
-# result = mlflow.register_model(
-#     model_uri=f"runs:/{best_run_id}/pipeline",
-#     name=MODEL_NAME,
-# )
-# client.transition_model_version_stage(
-#     name=MODEL_NAME, version=result.version, stage="Production",
-#     archive_existing_versions=True,
-# )
+# BEST_MODEL_URI = "models:/m-PASTE-FROM-FINALFIT-OUTPUT"
+#
+# result = mlflow.register_model(model_uri=BEST_MODEL_URI, name=MODEL_NAME)
+# print("registered version:", result.version)
+#
+# # promote to production via alias (works on DagsHub MLflow)
+# client.set_registered_model_alias(MODEL_NAME, "production", result.version)
+# print("alias 'production' now points to version", result.version)
 """),
 ]
 write(NB_DIR / "model_inference.ipynb", inference_cells)
